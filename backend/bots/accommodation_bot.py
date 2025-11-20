@@ -2,60 +2,98 @@ import os
 import json
 import google.generativeai as genai
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
-
-# Configure Gemini AI
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
+def calc_nights(check_in, check_out):
+    start = datetime.fromisoformat(check_in)
+    end = datetime.fromisoformat(check_out)
+    return max((end - start).days, 1)
+
 def run_accommodation_search(destination, check_in, check_out, budget_per_person, people):
-    print(f"🏨 Accommodation Bot: Searching stays in {destination} for {people} people...")
+    print(f" Accommodation Bot: Searching stays in {destination}...")
 
-    # 1. Calculate Total Budget for Stay (Assuming 40% of total budget goes to stay)
-    total_budget = int(budget_per_person) * int(people)
-    stay_budget = total_budget * 0.40 
+    nights = calc_nights(check_in, check_out)
 
-    # 2. Create the Prompt for the AI
+    # Total Budget (40% stays — aligned with budget rules)
+    stay_budget = int(budget_per_person) * int(people) * 0.40
+
     prompt = f"""
-    Act as a travel agent. Find 3 accommodation options in {destination} 
-    for dates {check_in} to {check_out}.
-    
+    You are an expert hotel planner. Provide the best 3 accommodation options 
+    in {destination} for {people} people from {check_in} to {check_out}. 
+
     Constraints:
-    - Total Budget for stay: ₹{stay_budget} approx.
-    - Number of people: {people}
-    
-    Return ONLY valid JSON in this exact format (do not add markdown formatting):
-    [
+    - Total stay budget: ₹{stay_budget}
+    - Nights: {nights}
+    - Include good places for food nearby
+    - Family & friends safe
+
+    STRICT OUTPUT FORMAT:
+    {{
+      "destination": "{destination}",
+      "nights": {nights},
+      "stay_budget": {int(stay_budget)},
+      "options": [
         {{
-            "name": "Hotel Name",
-            "type": "Hotel/Resort/Homestay",
-            "price_per_night": "Price in INR",
-            "rating": "4.5/5",
-            "description": "Short description matching the vibe."
+          "name": "Hotel Name",
+          "type": "Hotel / Resort / Homestay",
+          "price_per_night": 0,
+          "total_cost": 0,
+          "rating": "4.5/5",
+          "distance_to_center_km": 0.0,
+          "food_nearby": [
+              "Example Restaurant 1 - ₹200",
+              "Example Restaurant 2 - ₹300"
+          ],
+          "pros": ["Safe area", "Near attractions"],
+          "cons": ["Higher cost in weekends"],
+          "fits_budget": true
         }}
-    ]
+      ]
+    }}
+
+    Ensure numerical values are provided where needed.
+    No markdown, no ```JSON blocks — only clean JSON.
     """
 
     try:
-        # 3. Call the AI Model
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
-        
-        # 4. Clean the response (Remove ```json markers if AI adds them)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        
-        return json.loads(clean_text)
+
+        # Clean Gemini response
+        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+
+        data = json.loads(clean_json)
+
+        # Safety check
+        if "options" not in data:
+            raise ValueError("Invalid AI response structure")
+
+        print(" Accommodation Bot Done ✔")
+        return data
 
     except Exception as e:
-        print(f"⚠️ AI Error: {e}. Using Fallback Data.")
-        # Fallback data if AI fails or API key is missing
-        return [
-            {
-                "name": f"Standard {destination} Inn",
-                "type": "Hotel",
-                "price_per_night": f"₹{int(stay_budget/3)}",
-                "rating": "4.0/5",
-                "description": "A comfortable fallback option near the city center."
-            }
-        ]
+        print(f" Accommodation Bot failed: {e}")
+        # Fallback Minimal Valid Structure
+        return {
+            "destination": destination,
+            "nights": nights,
+            "stay_budget": int(stay_budget),
+            "options": [
+                {
+                    "name": "Fallback Lodge",
+                    "type": "Budget Stay",
+                    "price_per_night": stay_budget / nights,
+                    "total_cost": stay_budget,
+                    "rating": "4.0/5",
+                    "distance_to_center_km": 1.5,
+                    "food_nearby": ["Local Veg Restaurant - ₹200"],
+                    "pros": ["Cheapest & Convenient"],
+                    "cons": ["Less luxury"],
+                    "fits_budget": True
+                }
+            ]
+        }
